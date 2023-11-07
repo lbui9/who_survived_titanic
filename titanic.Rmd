@@ -1,0 +1,318 @@
+---
+title: "Assignment 10: Surviving the Titanic"
+author: "Linh Bui"
+date: "`r Sys.Date()`"
+documentclass: article
+geometry: margin=1in
+fontsize: 11pt
+output:
+  pdf_document:
+    toc: false
+    df_print: kable
+    fig_caption: false
+    number_sections: false
+    dev: pdf
+    highlight: tango
+  html_document:
+    theme: default
+    self_contained: true
+    toc: false
+    df_print: kable
+    fig_caption: false
+    number_sections: false
+    smart: true
+    dev: svg
+---
+
+```{r setup, include = FALSE}
+# DO NOT ALTER THIS CHUNK
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = TRUE,
+  fig.width = 5,
+  fig.asp = 0.618,
+  out.width = "70%",
+  dpi = 120,
+  fig.align = "center",
+  cache = FALSE
+)
+# Cost function for cross validation
+cost <- function(obs, pred) {
+  outcome <- pred > 0.5
+  return(1 - (sum(obs == outcome) / length(obs)))
+}
+# Load required packages
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(modelr))
+suppressPackageStartupMessages(library(boot))
+```
+
+
+## Exercise 1
+
+i. 
+
+```{r}
+train_df <- read_csv(file = "train.csv",
+                     col_types = cols(Pclass = col_character(),
+                                      SibSp = col_character(),
+                                      Parch = col_character()))
+```
+
+ii. 
+
+```{r}
+train_df <- train_df %>%
+  mutate(did_survive = as.logical(Survived))
+```
+
+
+## Exercise 2
+
+```{r}
+train_df %>%
+  pivot_longer(c('Age', 'Fare'), names_to = "name", values_to = "value") %>%
+  ggplot() +
+  geom_histogram(aes(x = value, fill = did_survive), alpha = 0.7) +
+  facet_wrap(~ name, scales = "free") +
+  labs(title = "Relationship between chance of survival and continuous variables")
+```
+
+* We can see from the graphs that the distributions of the survivors and non-survivors in both criteria have the same trend. Most survivors were young adults between their 20s and 40s. While the number of survivors paying for cheap tickets were significantly less than non-survivors, the ratio between survivors and non-survivors among the group of people buying higher ticket fees were quite similar. I think these differences might reflect that survivors tend to be rich passengers. 
+
+## Exercise 3
+
+```{r, fig.width = 8, fig.asp = 1}
+train_df %>%
+  pivot_longer(c('Pclass', 'Sex', 'Parch', 'SibSp'), 
+               names_to="name", values_to = "value") %>%
+  ggplot() +
+  geom_bar(aes(x = value, fill = did_survive)) +
+  facet_wrap(~ name, scales = "free") +
+  labs(title = 'Relationship between chance of survival and categorical variables')
+```
+
+* According to the above statistics, solo passengers had a higher mortality rate than those with families. Also, the higher class they were, the less likely they died. The number of women surviving the tragedy was much higher than the number of men. This makes a lot of sense to me. I watched Titanic when I was a kid and I remembered that women and children were prioritized to the lifeboats. The reason why people with families were more likely to survive was because they wanted to save kids and they allowed one adult to accompany the kid. Also, first-class passengers were highly prioritized because they paid more. 
+
+* I think Pclass variable would be the most helpful for predicting survival. Sex and Pclass were 2 most potential variables to predict. However, the number of first class passengers was the lowest among 3 classes, hence, it was most likely that all of them were offered a seat on the lifeboats. However, it was not 100% guaranteed that all women from all 3 classes were prioritized. Therefore, Sex variable seems to be more unexpected. 
+
+## Exercise 4
+
+```{r}
+train_df %>%
+  ggplot() +
+  geom_bar(aes(x = Pclass, fill = did_survive)) + 
+  facet_wrap(~ Sex, scales = "free") + 
+  labs(title = 'Relationship between chance of survival and PClass and gender')
+```
+
+* For both gender, the order of survival rate in terms of class was first class, third class, and then second class. The ratio of third-class female survivors to non-survivors was 1:1. Meanwhile, the ratio of third-class male survivors to male non-survivors was about 1:6. Most of women from first and second classes survived the tragedy. However, the number of male survivors from first and second classes did not make up half of the total number of men. Therefore, there seemed to be some interaction between the effect of gender and class on survival. 
+
+## Exercise 5
+
+i. 
+
+```{r}
+train_df %>%
+  summarize(
+    n = n() ,
+    missing = sum(is.na(Age)) ,
+    fraction_missing = missing / n
+  )
+```
+
+ii. 
+
+```{r}
+train_imputed <- train_df %>%
+  mutate(
+    age_imputed = if_else(
+      condition = is.na(Age),
+      true = median(Age, na.rm = TRUE),
+      false = Age
+    )
+  )
+```
+
+iii. 
+
+```{r}
+train_imputed %>%
+  summarize(
+    n = n() ,
+    missing = sum(is.na(age_imputed)) ,
+    fraction_missing = missing / n
+  )
+```
+
+
+## Exercise 6
+
+i. 
+
+```{r}
+model_1 <- glm(
+  Survived ~ age_imputed,
+  family = binomial(),
+  data = train_imputed
+)
+```
+
+ii. 
+
+```{r}
+model_1_preds <- train_imputed %>% 
+  add_predictions(
+    model_1,
+    type = "response"
+    ) %>%
+  mutate(
+    outcome = if_else(
+      condition = pred > 0.5,
+      true = 1,
+      false = 0
+      )
+    )
+```
+
+iii.
+
+```{r}
+model_1_preds %>%
+  mutate(
+    correct = if_else(
+      condition = Survived == outcome,
+      true = 1,
+      false = 0
+    )
+  ) %>%
+  summarize(
+    total_correct = sum(correct == 1),
+    accuracy = total_correct / n()
+  )
+```
+
+* The accuracy of the model is ~61.6%, which is unusually high. 
+
+## Exercise 7
+
+```{r}
+logistic_cv1 <- cv.glm(train_imputed, model_1, cost, K=5)
+```
+
+```{r}
+logistic_cv1$delta
+```
+
+
+## Exercise 8
+
+i. 
+
+```{r}
+model_2 <- glm(
+  Survived ~ age_imputed + SibSp + Pclass + Sex,
+  family = binomial(),
+  data = train_imputed
+)
+```
+
+```{r}
+model_2_preds <- train_imputed %>% 
+  add_predictions(
+    model_2,
+    type = "response"
+    ) %>%
+  mutate(
+    outcome = if_else(
+      condition = pred > 0.5,
+      true = 1,
+      false = 0
+      )
+    )
+```
+
+```{r}
+model_2_preds %>%
+  mutate(
+    correct = if_else(
+      condition = Survived == outcome,
+      true = 1,
+      false = 0
+    )
+  ) %>%
+  summarize(
+    total_correct = sum(correct == 1),
+    accuracy = total_correct / n()
+  )
+```
+
+```{r}
+logistic_cv2 <- cv.glm(train_imputed, model_2, cost, K=5)
+```
+
+```{r}
+logistic_cv2$delta
+```
+ 
+* The cross-validation error of this model is 0.2008979. 
+
+ii. 
+
+```{r}
+model_3 <- glm(
+  Survived ~ age_imputed * Pclass * Sex + SibSp,
+  family = binomial(),
+  data = train_imputed
+)
+```
+
+```{r}
+model_3_preds <- train_imputed %>% 
+  add_predictions(
+    model_3,
+    type = "response"
+    ) %>%
+  mutate(
+    outcome = if_else(
+      condition = pred > 0.5,
+      true = 1,
+      false = 0
+      )
+    )
+```
+
+```{r}
+model_3_preds %>%
+  mutate(
+    correct = if_else(
+      condition = Survived == outcome,
+      true = 1,
+      false = 0
+    )
+  ) %>%
+  summarize(
+    total_correct = sum(correct == 1),
+    accuracy = total_correct / n()
+  )
+```
+
+```{r}
+logistic_cv3 <- cv.glm(train_imputed, model_3, cost, K=5)
+```
+
+```{r}
+logistic_cv3$delta
+```
+
+* The cross-validation error of this model is 0.1885522.
+
+iii.
+
+* The third model has the most accurate validation error. This is what I expected because I saw some correlation between variables as I mentioned in Exercise 4. Therefore, a multiplication should be put between Sex, Class Type, and Age instead of a plus sign to reflect the correlation. 
+
+
+## Bonus Exercise
+
+If you choose to do the bonus exercise, write your code here. Otherwise you can delete this section.
+
